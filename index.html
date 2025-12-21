@@ -108,7 +108,7 @@
   <div id="overlay" class="fixed inset-0 z-[200] flex items-center justify-center bg-[#050103] transition-opacity duration-1000">
     <div class="text-center glass rounded-[30px] px-10 py-10">
       <h1 class="text-6xl md:text-8xl font-['Playfair_Display'] text-[#e7fff1] mb-2 drop-shadow-[0_0_32px_rgba(0,255,120,0.25)]">
-        Dear LinLin XMAS
+        TO : My Baby LinLin
       </h1>
       <p class="text-[#ffd1d1] text-xs tracking-[0.42em] mb-8 opacity-85 uppercase">
         I • LOVE • U 
@@ -582,7 +582,7 @@ fontLoader.load(
   (font) => {
     const textGeo = new TextGeometry("Yu Eugene edit", {
       font,
-      size: 0.5,        // 先别用 5，太大反而更难定位
+      size: 0.4,        // 先别用 5，太大反而更难定位
       height: 0.02,
       curveSegments: 2,
       bevelEnabled: false
@@ -596,7 +596,7 @@ fontLoader.load(
 
     // ✅ 先放“镜头正中前方”确认一定看得到
     // 看到后再改到左下角（下面给你）
-   textMesh.position.set(-14.5, -7.5, 2.2);
+   textMesh.position.set(15.0, -4.5, 2.2);
     textMesh.scale.set(0.6, 0.6, 0.6);
 
     scene.add(textMesh);
@@ -805,3 +805,4 @@ fontLoader.load(
   </script>
 </body>
 </html>
+
