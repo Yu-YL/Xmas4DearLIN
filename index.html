@@ -156,7 +156,7 @@
     // 1) 同目录： "./xmas.mp3"
     // 2) assets 子目录： "./assets/xmas.mp3"
     // =========================
-    const MUSIC_URL = "./xmass.mp3"; // ← 需要改路径就改这里
+    const MUSIC_URL = "./xmas.mp3"; // ← 需要改路径就改这里
 
     // =========================
     // 0) 圣诞配色（绿 + 红 + 金白）
@@ -278,6 +278,15 @@
 
     let meshLeaves, meshCubes, meshIcos, meshRibbon;
     let starMesh, starGlow, snowPoints;
+
+    // =========================
+    // 📷 照片相关
+    // 为了让圣诞树上可以挂照片，这里定义图片路径与容器。
+    // 可根据需要将 1.jpg 至 10.jpg 放在同目录中，这些图片将作为圣诞树上的挂件。
+    const PHOTO_COUNT = 10;
+    const PHOTO_PATHS = Array.from({ length: PHOTO_COUNT }, (_, i) => `./${i + 1}.jpg`);
+    let photoSprites = [];
+    let photoStrings = [];
 
     function setMode(next){
       if (mode !== next) { mode = next; transitionActive = true; }
@@ -453,7 +462,7 @@
 
   // ✅ 少量自发光让 bloom 更容易抓到亮点（不要太高）
   emissive: new THREE.Color(SILVER),
-  emissiveIntensity: 0.16
+  emissiveIntensity: 0.3
 }); 
 
 // =========================
@@ -568,6 +577,61 @@ scene.environment = pmrem.fromScene(
       // 雪
       snowPoints = makeSnow();
       scene.add(snowPoints);
+
+      // =========================
+      // 📷 加载照片精灵
+      // 这里使用 TextureLoader 加载本地的 1.jpg 至 10.jpg，并将它们作为 Sprite 挂在树上。
+      {
+        const loader = new THREE.TextureLoader();
+        photoSprites = [];
+        PHOTO_PATHS.forEach((path, index) => {
+          loader.load(
+            path,
+            (texture) => {
+              // 使用 SpriteMaterial 保证图片始终朝向镜头
+              const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+              const sprite = new THREE.Sprite(material);
+              // 根据图片纵横比调整尺寸；基准宽度可以适当调小或调大
+              const baseSize = 2.0; // 挂件尺寸进一步放大，提升辨识度
+              const ratio = texture.image.height / texture.image.width;
+              sprite.scale.set(baseSize, baseSize * ratio, 1);
+              // 根据索引按比例放置在树体不同高度
+              const t = (index + 0.5) / PHOTO_COUNT;
+              const posPhoto = sampleTreeCone(t, 1.2);
+              // 将挂件略微外移，使其不被树枝遮挡
+              const radialScale = 1.1;
+              const adjusted = posPhoto.clone();
+              adjusted.x *= radialScale;
+              adjusted.z *= radialScale;
+              sprite.position.copy(adjusted);
+              // 初始仅在 TREE 模式显示
+              // 默认可见，后续动画会根据当前模式切换可见性
+              sprite.visible = true;
+              // 添加到整体 group 中，这样会随树旋转
+              group.add(sprite);
+              photoSprites.push(sprite);
+
+              // 为每张照片添加一个悬挂的绳子，使其看起来挂在树上
+              const anchor = sprite.position.clone();
+              // 绳子的长度可根据需要调整
+              anchor.y += 1.2;
+              const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                anchor,
+                sprite.position.clone()
+              ]);
+              const lineMaterial = new THREE.LineBasicMaterial({ color: new THREE.Color(GOLD) });
+              const line = new THREE.Line(lineGeometry, lineMaterial);
+              line.visible = true;
+              group.add(line);
+              photoStrings.push(line);
+            },
+            undefined,
+            (err) => {
+              console.error('Failed to load photo', path, err);
+            }
+          );
+        });
+      }
 
       // 点击切换 TREE/EXPLODE
       window.addEventListener("pointerdown", () => setMode(mode === "EXPLODE" ? "TREE" : "EXPLODE"));
@@ -705,6 +769,19 @@ fontLoader.load(
         starGlow.scale.set(3.4 + 0.45*pulse, 3.4 + 0.45*pulse, 1);
       }
 
+      // 根据模式切换照片显示：在 TREE 模式显示挂件
+      if (photoSprites && photoSprites.length > 0) {
+        const show = (mode === "TREE");
+        for (const sprite of photoSprites) {
+          sprite.visible = show;
+        }
+        if (photoStrings && photoStrings.length > 0) {
+          for (const line of photoStrings) {
+            line.visible = show;
+          }
+        }
+      }
+
       // 手势（仅 Gesture Mode）
       if (handLandmarker && video && video.readyState >= 2) {
         if (video.currentTime !== lastVideoTime) {
@@ -779,6 +856,9 @@ fontLoader.load(
       // 3) 初始化渲染
       initScene();
 
+      // 3.5) 默认展开为圣诞树形态，以便立即看见照片挂件
+      setMode("TREE");
+
       // 4) 手势模式：摄像头 + Mediapipe
       if (gesture){
         video.style.display = "block";
@@ -805,5 +885,3 @@ fontLoader.load(
   </script>
 </body>
 </html>
-
-
