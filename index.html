@@ -27,6 +27,11 @@
       display: block;
     }
 
+    /* 隐藏手势模式按钮，只保留 ENTER 按钮 */
+    #gestureBtn {
+      display: none;
+    }
+
     /* 手势预览：只在 Gesture Mode 开启后显示；位置往上挪，避免挡底部 */
     #webcam {
       transform: scaleX(-1);
@@ -279,6 +284,10 @@
     let meshLeaves, meshCubes, meshIcos, meshRibbon;
     let starMesh, starGlow, snowPoints;
 
+    // 标记当前是否启用了手势模式，在手势模式下旋转根据手掌控制；
+    // 在非手势模式下树会持续匀速旋转，以便照片绕树运动。
+    let gestureEnabled = false;
+
     // =========================
     // 📷 照片相关
     // 为了让圣诞树上可以挂照片，这里定义图片路径与容器。
@@ -288,8 +297,26 @@
     let photoSprites = [];
     let photoStrings = [];
 
+    // 🌲 照片在树形态和爆炸形态之间的目标/当前位置
+    // tree: 圣诞树形态的目标位置
+    // explode: 散开时的目标位置（随机散落在较小半径球内以保证可见）
+    // current: 动画过程中实际位置，用于插值
+    const photoPos = { tree: [], explode: [], current: [] };
+
     function setMode(next){
-      if (mode !== next) { mode = next; transitionActive = true; }
+      // 切换模式时，不仅需要标记过渡，还要在进入爆炸模式时
+      // 为每张照片重新生成随机散开位置，这样每次展开都会呈现不同的排列。
+      if (mode !== next) {
+        mode = next;
+        transitionActive = true;
+        // 若切换到 EXPLODE 模式，则重新随机生成照片的爆炸目标位置
+        if (mode === "EXPLODE" && photoPos && photoPos.explode) {
+          for (let i = 0; i < photoPos.explode.length; i++) {
+            // 使用较大的半径让照片散布更开阔
+            photoPos.explode[i] = sampleExplode(28);
+          }
+        }
+      }
     }
 
     function sampleTreeCone(ratio, jitter=1.0){
@@ -604,6 +631,12 @@ scene.environment = pmrem.fromScene(
               adjusted.x *= radialScale;
               adjusted.z *= radialScale;
               sprite.position.copy(adjusted);
+              // 记录照片在树形态和爆炸形态下的目标/当前位置
+              photoPos.tree.push(adjusted.clone());
+              photoPos.current.push(adjusted.clone());
+              // 随机生成照片在散开模式下的位置，使用较小半径确保照片不会跑出视野
+               // 初始爆炸位置使用更大半径，让散开时照片分布更开
+               photoPos.explode.push(sampleExplode(28));
               // 初始仅在 TREE 模式显示
               // 默认可见，后续动画会根据当前模式切换可见性
               sprite.visible = true;
@@ -620,10 +653,11 @@ scene.environment = pmrem.fromScene(
                 sprite.position.clone()
               ]);
               const lineMaterial = new THREE.LineBasicMaterial({ color: new THREE.Color(GOLD) });
-              const line = new THREE.Line(lineGeometry, lineMaterial);
-              line.visible = true;
-              group.add(line);
-              photoStrings.push(line);
+               const line = new THREE.Line(lineGeometry, lineMaterial);
+               // 挂绳默认隐藏，让照片显得自由漂浮
+               line.visible = false;
+               group.add(line);
+               photoStrings.push(line);
             },
             undefined,
             (err) => {
@@ -716,6 +750,51 @@ fontLoader.load(
     }
 
     // =========================
+    // 更新照片位置
+    // 根据当前模式（TREE 或 EXPLODE）在树形态和散开形态之间插值移动照片。
+    // 在动画过程中，我们还更新连接照片的绳子的几何信息。
+    function updatePhotos(){
+      if (!photoSprites || photoSprites.length === 0) return;
+      for (let i = 0; i < photoSprites.length; i++) {
+        const sprite = photoSprites[i];
+        const current = photoPos.current[i];
+        // 选择目标位置
+        const target = (mode === "EXPLODE") ? photoPos.explode[i] : photoPos.tree[i];
+        // 线性插值更新当前位置
+        current.x += (target.x - current.x) * LERP_SPEED;
+        current.y += (target.y - current.y) * LERP_SPEED;
+        current.z += (target.z - current.z) * LERP_SPEED;
+        sprite.position.set(current.x, current.y, current.z);
+        // 更新绳子
+        if (photoStrings && photoStrings[i]) {
+          const line = photoStrings[i];
+          const anchor = new THREE.Vector3(current.x, current.y + 1.2, current.z);
+          line.geometry.setFromPoints([anchor, current.clone()]);
+        }
+      }
+    }
+
+    // 在 EXPLODE 模式下缓慢旋转散开目标位置，营造动态散开的流动感
+    function swirlExplosionPositions(){
+      if (mode !== "EXPLODE") return;
+      const angle = 0.0025;
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      // 包含装饰物和照片的散开目标数组
+      const groups = [pos.leaves.explode, pos.cubes.explode, pos.icos.explode, pos.ribbon.explode, photoPos.explode];
+      for (const arr of groups) {
+        if (!arr) continue;
+        for (let i=0; i<arr.length; i++) {
+          const p = arr[i];
+          const x = p.x;
+          const z = p.z;
+          p.x = x * cosA - z * sinA;
+          p.z = x * sinA + z * cosA;
+        }
+      }
+    }
+
+    // =========================
     // 6) 手势初始化（Gesture Mode 才启用）
     // =========================
     async function initHandTracking(){
@@ -760,7 +839,7 @@ fontLoader.load(
         attr.needsUpdate = true;
       }
 
-      // 星星呼吸 + 微旋
+       // 星星呼吸 + 微旋
       if (starMesh && starGlow){
         const t = performance.now()*0.001;
         starMesh.rotation.y += 0.01;
@@ -769,15 +848,17 @@ fontLoader.load(
         starGlow.scale.set(3.4 + 0.45*pulse, 3.4 + 0.45*pulse, 1);
       }
 
-      // 根据模式切换照片显示：在 TREE 模式显示挂件
+       // 在 EXPLODE 模式下让散开目标缓慢旋转，照片与装饰物都会呈现流动效果
+       swirlExplosionPositions();
+
+       // 照片始终可见，由 updatePhotos 负责调整位置；挂绳始终隐藏，使照片看起来自由漂浮
       if (photoSprites && photoSprites.length > 0) {
-        const show = (mode === "TREE");
         for (const sprite of photoSprites) {
-          sprite.visible = show;
+          sprite.visible = true;
         }
         if (photoStrings && photoStrings.length > 0) {
           for (const line of photoStrings) {
-            line.visible = show;
+            line.visible = false;
           }
         }
       }
@@ -822,20 +903,25 @@ fontLoader.load(
         cursor.style.opacity = "0";
       }
 
-      // 过渡更新（性能优化：稳定后可停；这里保留更新逻辑）
-      if (transitionActive) {
-        const d1 = updateInstanced(meshLeaves, pos.leaves, COUNT_LEAVES);
-        const d2 = updateInstanced(meshCubes,  pos.cubes,  COUNT_CUBES);
-        const d3 = updateInstanced(meshIcos,   pos.icos,   COUNT_ICOS);
-        const d4 = updateInstanced(meshRibbon, pos.ribbon, COUNT_RIBBON);
-        if (Math.max(d1,d2,d3,d4) < 1e-4) transitionActive = false;
-      }
+       // 更新所有实例化装饰物的位置矩阵。
+       // 即使过渡已完成，也需要持续更新，以便散开模式下的位置旋转能实时反映。
+       const d1 = updateInstanced(meshLeaves, pos.leaves, COUNT_LEAVES);
+       const d2 = updateInstanced(meshCubes,  pos.cubes,  COUNT_CUBES);
+       const d3 = updateInstanced(meshIcos,   pos.icos,   COUNT_ICOS);
+       const d4 = updateInstanced(meshRibbon, pos.ribbon, COUNT_RIBBON);
+       // 仅在过渡过程中监控误差，以便停止过渡标记；仍继续更新实例矩阵。
+       if (transitionActive && Math.max(d1,d2,d3,d4) < 1e-4) {
+         transitionActive = false;
+       }
 
-      // 整体旋转
-      if (group){
-        group.rotation.y += 0.0022;
-        group.rotation.y += (targetRotationY - group.rotation.y) * 0.05;
-      }
+      // 更新照片的位置，使其在两种形态之间平滑过渡
+      updatePhotos();
+
+       // 整体旋转：始终以一个固定速度旋转圣诞树，不再根据手势调整角度。
+       if (group){
+         // 基础匀速旋转，使照片围绕圣诞树转动
+         group.rotation.y += 0.004;
+       }
 
       composer.render();
     }
@@ -844,12 +930,15 @@ fontLoader.load(
     // 7) 启动
     // =========================
     async function start({ gesture }){
-      // 1) 全屏 + 音乐（必须用户点击触发）
+      // 1) 记录是否启用手势
+      gestureEnabled = gesture;
+
+      // 2) 全屏 + 音乐（必须用户点击触发）
       await requestFS();
       musicBtn.style.display = "block";
       await startMusic();
 
-      // 2) Overlay 淡出
+      // 3) Overlay 淡出
       overlay.style.opacity = "0";
       setTimeout(()=> overlay.remove(), 950);
 
@@ -880,8 +969,8 @@ fontLoader.load(
       }
     }
 
+    // 进入按钮启用摄像头；隐藏的手势模式按钮不再添加监听
     enterBtn.addEventListener("click", () => start({ gesture:true }));
-    gestureBtn.addEventListener("click", () => start({ gesture:true }));
   </script>
 </body>
 </html>
